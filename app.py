@@ -60,14 +60,49 @@ def _gc_runs():
     for rid in stale:
         run_cache.pop(rid, None)
 
+# def build_random_query() -> str:
+#     ages = ["teenage", "young", "middle-aged", "elderly"]
+#     races = ["white", "black", "asian"]
+#     age = random.choice(ages)
+#     gender_candidates = ["boy", "girl"] if age in ["teenage", "young"] else ["male", "female"]
+#     race = random.choice(races)
+#     gender = random.choice(gender_candidates)
+#     return f"{age} {race} {gender}"
+
 def build_random_query() -> str:
-    ages = ["teenage", "young", "middle-aged", "elderly"]
-    races = ["white", "black", "asian"]
-    age = random.choice(ages)
-    gender_candidates = ["boy", "girl"] if age in ["teenage", "young"] else ["male", "female"]
-    race = random.choice(races)
-    gender = random.choice(gender_candidates)
-    return f"{age} {race} {gender}"
+    """
+    사람 / 동물(강아지, 고양이) / 풍경(산, 바다, 사막) 중 하나를 랜덤으로 선택해
+    Unsplash 검색용 query 문자열을 만들어 반환한다.
+    """
+    category = random.choice(["human", "dog", "cat", "landscape"])
+
+    # ---------------- 사람 ----------------
+    if category == "human":
+        ages = ["teenage", "young", "middle-aged", "elderly"]
+        races = ["white", "black", "asian"]
+        age = random.choice(ages)
+        race = random.choice(races)
+        gender_candidates = (
+            ["boy", "girl"] if age in ["teenage", "young"] else ["male", "female"]
+        )
+        gender = random.choice(gender_candidates)
+        return f"{age} {race} {gender}"
+
+    # ---------------- 강아지 ----------------
+    if category == "dog":
+        colors = ["brown dog", "white dog"]
+        return random.choice(colors)
+
+    # ---------------- 고양이 ----------------
+    if category == "cat":
+        colors = ["brown cat", "white cat"]
+        return random.choice(colors)
+
+    # ---------------- 풍경 ----------------
+    if category == "landscape":
+        scenes = ["mountain landscape", "ocean sea view landscape", "desert landscape"]
+        return random.choice(scenes)
+
 
 async def fetch_unsplash_image(query: str) -> List[str]:
     assert http_session is not None
@@ -126,10 +161,12 @@ async def image_analysis(
 
     if rec is None:
         query = build_random_query()
-        prompt = (
-            f"A realistic portrait of a {query} captured in natural daylight. "
-            "Gentle facial expression, smooth lighting, and soft background blur."
-        )
+        if "landscape" in query:
+            prompt = f"A high-resolution landscape photo of {query}, natural lighting, clear atmosphere."
+        else:
+            prompt = (
+        f"A realistic portrait of a {query} captured in natural daylight. "
+        "Gentle facial expression, smooth lighting, and soft background blur.")
         real_urls, gen_url = await asyncio.gather(
             fetch_unsplash_image(query),
             generate_dalle_image(prompt),
