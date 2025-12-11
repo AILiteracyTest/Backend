@@ -1,22 +1,25 @@
 import os
+from pathlib import Path
 
 # -----------------------------
 # 경로 관련
 # -----------------------------
 
+BASE_DIR = Path(__file__).resolve().parent
+
 # 모델 저장 폴더
-models_dir = 'models'
+models_dir = BASE_DIR / "models"
 
 # loss curve 저장 폴더
-losses_dir = 'losses'
+losses_dir = BASE_DIR / 'losses'
 
 # reconstruction 결과 (예: fake 이미지 heatmap 테스트용) 저장 폴더
-res_dir = 'results'
+res_dir = BASE_DIR / 'results'
 
 # 데이터 루트 폴더 (여기 아래에 train/val 폴더가 있다고 가정)
-data_dir = 'data'          # ./data
-train_dir = 'train'        # ./data/train
-val_dir = 'val'            # ./data/val
+data_dir = BASE_DIR / 'data'          # ./data
+train_dir = BASE_DIR / 'train'        # ./data/train
+val_dir = BASE_DIR / 'val'            # ./data/val
 
 # 나중에 train.py에서:
 # train_data_dir = os.path.join(data_dir, train_dir)

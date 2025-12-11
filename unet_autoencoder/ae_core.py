@@ -1,81 +1,12 @@
 import os
 import torch
-import torch.nn as nn
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 from torchvision import transforms
 
-from unet import UNet
-import config as cfg
-
-import base64
-
-def load_image_base64(path):
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
-
-def ask_vlm_explanation(overlay_path, mean_err, p95_err, max_err):
-    img_b64 = load_image_base64(overlay_path)
-
-    system_prompt = """
-    당신의 역할은 '이미지가 왜 AI가 생성한 이미지처럼 보이는지'
-    Autoencoder 재구성 오차(heatmap)를 근거로 명확하게 설명하는 것입니다.
-
-    제공되는 합성 이미지에는 다음 네 가지가 포함됩니다:
-    1) 원본 이미지
-    2) Autoencoder 재구성 이미지
-    3) 재구성 오차 히트맵 (파랑=오차 낮음, 빨강=오차 큼)
-    4) 히트맵을 원본 위에 덮은 오버레이 이미지
-
-    Autoencoder는 '실제 사진(real-world photos)'만을 학습한 모델이며,
-    특정 영역에서 재구성 오차가 크다는 것은
-    그 구역이 실제 사진 분포에서 벗어난 비정상적 패턴을 포함할 가능성이 있음을 의미합니다.
-
-    당신의 답변에서는 다음을 지켜주세요:
-    - 구체적인 위치(예: 눈 주변, 머리카락 경계, 배경 물체 형태 등)를 언급하세요.
-    - '왜 해당 영역이 비정상적인지'를 사진적 관점(텍스처, 형태, 조명, 구조 등)에서 설명하세요.
-    - 100% 가짜라고 단정하지 말고, '이런 이유로 AI 생성 가능성이 있다'는 식으로 서술하세요.
-    - 출력 언어는 반드시 한국어로 하세요.
-    """
-
-    user_text = f"""
-    아래 이미지는 원본/재구성/오차 히트맵/오버레이를 하나로 합친 이미지입니다.
-
-    Autoencoder 재구성 오차 통계값은 다음과 같습니다:
-    - 평균 오차(mean error): {mean_err:.6f}
-    - 95퍼센타일 오차(p95 error): {p95_err:.6f}
-    - 최대 오차(max error): {max_err:.6f}
-
-    다음을 설명해주세요:
-    1) 이미지에서 재구성 오차가 큰(빨간색) 영역이 구체적으로 어디인지.
-    2) 그 영역들이 왜 'AI가 생성한 이미지일 가능성'을 나타낼 수 있는지.
-    """
-
-    from openai import OpenAI
-    client = OpenAI()
-
-    response = client.chat.completions.create(
-        model="gpt-4o",   
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_text},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/png;base64,{img_b64}"
-                        }
-                    },
-                ],
-            },
-        ],
-        temperature=0.4,
-    )
-
-    return response.choices[0].message.content
+from .unet import UNet
+from . import config as cfg
 
 # -----------------------------
 # 설정
@@ -100,9 +31,9 @@ os.makedirs(cfg.res_dir, exist_ok=True)
 # -----------------------------
 # 1) 모델 로드
 # -----------------------------
-def load_ae_model(ckpt_name="model20.pth"):
-    model_path = os.path.join(cfg.models_dir, ckpt_name)
-    ckpt = torch.load(model_path, map_location=device)
+def load_ae_model(ckpt_name: str = "model20.pth"):
+    model_path = os.path.join(cfg.models_dir, ckpt_name)    
+    ckpt = torch.load(str(model_path), map_location=device, weights_only=False)
 
     model = UNet(
         in_channels=3,
@@ -218,11 +149,14 @@ def visualize_result(orig_img_rgb, x, recon, error_map, save_path):
     plt.close()
     print(f"Saved visualization to {save_path}")
 
-
 # -----------------------------
 # 5) 하나의 이미지에 대해 전체 파이프라인 실행
 # -----------------------------
-def run_on_image(img_path, ckpt_name="model20.pth"):
+def run_ae(img_path, ckpt_name="model20.pth"):
+    """
+    img_path: 분석할 이미지 경로 (로컬 파일)
+    return: dict 형태로 결과 반환
+    """
     model = load_ae_model(ckpt_name)
     x, orig = load_image_as_tensor(img_path)
     recon, err_map = compute_error_map(model, x)
@@ -236,13 +170,9 @@ def run_on_image(img_path, ckpt_name="model20.pth"):
     save_path = os.path.join(cfg.res_dir, f"{base}_ae_heatmap.png")
     visualize_result(orig, x, recon, err_map, save_path)
 
-    # 여기서 VLM 호출
-    explanation = ask_vlm_explanation(save_path, mean_err, p95_err, max_err)
-    print("=== VLM explanation ===")
-    print(explanation)
-
-
-if __name__ == "__main__":
-    # 여기에 테스트해보고 싶은 이미지 경로 넣기
-    test_img_path = "test/fake_01.png"  # 예시
-    run_on_image(test_img_path, ckpt_name="model20.pth")
+    return {
+        "overlay_path": save_path,
+        "mean_err": float(mean_err),
+        "p95_err": float(p95_err),
+        "max_err": float(max_err),
+    }
