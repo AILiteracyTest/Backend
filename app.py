@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import uuid
 import asyncio
@@ -9,9 +10,17 @@ from io import BytesIO
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
+from pathlib import Path 
+
+from unet_autoencoder.ae_explain import analyze_and_explain
+
+BASE_DIR = Path(__file__).resolve().parent
+TMP_DIR = BASE_DIR / "tmp_images"
+TMP_DIR.mkdir(exist_ok=True)
 
 OPENAI_API_KEY      = os.getenv("OPENAI_API_KEY")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
@@ -116,6 +125,28 @@ async def fetch_unsplash_image(query: str) -> List[str]:
     photos = [data] if isinstance(data, dict) else (data or [])
     return [f"{photos[0]['urls']['raw']}&fm=jpg&w=1080"] if photos else []
 
+async def download_image(url: str) -> str:
+    """
+    DALL·E가 생성한 이미지 URL을 받아서 로컬에 저장하고,
+    저장된 파일 경로를 문자열로 반환.
+    """
+    assert http_session is not None
+
+    filename = TMP_DIR / f"{uuid.uuid4().hex}.png"
+    async with http_session.get(url) as resp:
+        if resp.status != 200:
+            txt = await resp.text()
+            raise HTTPException(
+                status_code=502,
+                detail=f"Download error: {resp.status}, {txt[:200]}"
+            )
+        content = await resp.read()
+
+    with open(filename, "wb") as f:
+        f.write(content)
+
+    return str(filename)
+
 async def generate_dalle_image(prompt: str) -> str:
     assert oai_client is not None
     resp = await oai_client.images.generate(
@@ -129,6 +160,7 @@ async def generate_dalle_image(prompt: str) -> str:
 # ========= 응답 모델(간소화) =========
 class SyntheticOut(BaseModel):
     generated_image_url: Optional[str] = None
+    explanation: Optional[str] = None
 
 class ImageAnalysisOut(BaseModel):
     mode: str
@@ -160,6 +192,7 @@ async def image_analysis(
             rec = None
 
     if rec is None:
+        # 1) 쿼리 & 프롬프트 생성
         query = build_random_query()
         if "landscape" in query:
             prompt = f"A high-resolution landscape photo of {query}, natural lighting, clear atmosphere."
@@ -167,22 +200,39 @@ async def image_analysis(
             prompt = (
         f"A realistic portrait of a {query} captured in natural daylight. "
         "Gentle facial expression, smooth lighting, and soft background blur.")
+
         real_urls, gen_url = await asyncio.gather(
             fetch_unsplash_image(query),
             generate_dalle_image(prompt),
         )
+        
+        # 3) DALL·E 이미지 로컬로 다운로드
+        local_fake_path = await download_image(gen_url)
+        
+        # 4) U-Net AE + VLM 설명 실행 
+        ae_result = await run_in_threadpool(analyze_and_explain, local_fake_path)
+        
         run_id = uuid.uuid4().hex
         run_cache[run_id] = {
             "created_at": time.time(),
             "query": query,
             "unsplash": real_urls,
             "gen_url": gen_url,
+            "ae_result": ae_result,
         }
+        
+    if rec is not None and ae_result is None:
+        # 필요 시 재분석 (선택사항)
+        local_fake_path = await download_image(gen_url)
+        ae_result = await run_in_threadpool(analyze_and_explain, local_fake_path)
+        rec["ae_result"] = ae_result
+        
+    explanation_text = ae_result.get("explanation") if ae_result else None
 
     return ImageAnalysisOut(
         mode=mode,
         run_id=run_id,
         query=query,
         unsplash={"images": real_urls},
-        synthetic=SyntheticOut(generated_image_url=gen_url),
+        synthetic=SyntheticOut(generated_image_url=gen_url, explanation=explanation_text,),
     )
