@@ -5,6 +5,7 @@ import uuid
 import asyncio
 import random
 import aiohttp
+import sqlite3 #백분위 계산
 
 from io import BytesIO
 from typing import Optional, List, Dict, Any
@@ -21,6 +22,7 @@ from unet_autoencoder.ae_explain import analyze_and_explain
 BASE_DIR = Path(__file__).resolve().parent
 TMP_DIR = BASE_DIR / "tmp_images"
 TMP_DIR.mkdir(exist_ok=True)
+SCORE_DB_PATH=BASE_DIR/'scores.db' #백분위 계산 - DB 파일 경로 상수 추가
 
 OPENAI_API_KEY      = os.getenv("OPENAI_API_KEY")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
@@ -51,6 +53,7 @@ async def _startup():
     timeout = aiohttp.ClientTimeout(total=60)
     http_session = aiohttp.ClientSession(timeout=timeout, trust_env=True)
     oai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    await run_in_threadpool(_init_score_db) #백분위 계산-DB 초기화 연결
 
 @app.on_event("shutdown")
 async def _shutdown():
@@ -112,7 +115,44 @@ def build_random_query() -> str:
         scenes = ["mountain landscape", "ocean sea view landscape", "desert landscape"]
         return random.choice(scenes)
 
+def _init_score_db() -> None: #백분위 계산-점수 테이블 생성 함수
+    conn=sqlite3.connect(SCORE_DB_PATH)
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS scores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                score INTEGER NOT NULL,
+                created_at REAL NOT NULL
+            )
+        """)
+        conn.commit()
+    finally: 
+        conn.close()
 
+def _insert_and_calc(score: int) -> dict: #백분위-DB 저장 + 백분위 계산 함수
+    conn = sqlite3.connect(SCORE_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        # 1) 저장
+        conn.execute(
+            "INSERT INTO scores (score, created_at) VALUES (?, ?)",
+            (score, time.time())
+        )
+        conn.commit()
+
+        # 2) 전체 점수 기반 통계 (가장 단순)
+        rows = conn.execute("SELECT score FROM scores").fetchall()
+        scores = [r["score"] for r in rows]
+        total = len(scores)
+
+        higher = sum(1 for s in scores if s > score)
+        rank = higher + 1
+        percentile = round((higher / total) * 100) if total else 0
+
+        return {"rank": rank, "total": total, "percentile": percentile}
+    finally:
+        conn.close()
+        
 async def fetch_unsplash_image(query: str) -> List[str]:
     assert http_session is not None
     url = "https://api.unsplash.com/photos/random"
@@ -168,7 +208,9 @@ class ImageAnalysisOut(BaseModel):
     query: str
     unsplash: Dict[str, List[str]]
     synthetic: SyntheticOut
-
+    
+class ScoreIn(BaseModel): #백분위 계산-점수 요청 모델
+    score: int
 # ========= 라우트 (Sightengine 제거) =========
 @app.get("/image_analysis", response_model=ImageAnalysisOut)
 async def image_analysis(
@@ -236,3 +278,12 @@ async def image_analysis(
         unsplash={"images": real_urls},
         synthetic=SyntheticOut(generated_image_url=gen_url, explanation=explanation_text,),
     )
+
+@app.post("/score") #백분위 계산-엔트포인트 추가
+async def save_score(payload: ScoreIn):
+    
+    if payload.score < 0:
+        raise HTTPException(status_code=400, detail='score must be >= 0')
+    
+    stats = await run_in_threadpool(_insert_and_calc, payload.score)
+    return stats
