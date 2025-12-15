@@ -149,7 +149,7 @@ def _insert_and_calc(score: int) -> dict: #백분위-DB 저장 + 백분위 계�
         rank = higher + 1
         percentile = round((higher / total) * 100) if total else 0
 
-        return {"rank": rank, "percentile": percentile}
+        return {"rank": rank,"total": total, "percentile": percentile}
     finally:
         conn.close()
         
