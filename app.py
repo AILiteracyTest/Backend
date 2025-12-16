@@ -105,13 +105,27 @@ def build_random_query() -> str:
 
     # ---------------- 강아지 ----------------
     if category == "dog":
-        colors = ["brown dog", "white dog"]
-        return random.choice(colors)
+        ages = ["puppy", "young", "adult", "senior"]
+        colors = ["brown", "white", "black", "golden"]
+        breeds = ["labrador", "poodle", "mixed-breed"]
+
+        age = random.choice(ages)
+        color = random.choice(colors)
+        breed = random.choice(breeds)
+
+        return f"{age} {color} {breed} dog"
 
     # ---------------- 고양이 ----------------
     if category == "cat":
-        colors = ["brown cat", "white cat"]
-        return random.choice(colors)
+        ages = ["kitten", "young", "adult", "senior"]
+        colors = ["white", "black", "gray", "orange"]
+        breeds = ["persian", "siamese", "tabby", "mixed-breed"]
+
+        age = random.choice(ages)
+        color = random.choice(colors)
+        breed = random.choice(breeds)
+
+        return f"{age} {color} {breed} cat"
 
     # ---------------- 풍경 ----------------
     if category == "landscape":
@@ -244,8 +258,12 @@ async def image_analysis(
             prompt = f"A high-resolution landscape photo of {query}, natural lighting, clear atmosphere."
         else:
             prompt = (
-        f"A realistic portrait of a {query} captured in natural daylight. "
-        "Gentle facial expression, smooth lighting, and soft background blur.")
+                f"A natural candid photo of a {query} outdoors, "
+                "standing on a city street or in a park during daytime. "
+                "Unposed moment, looking slightly away from the camera, "
+                "natural skin texture, realistic lighting, "
+                "shot with a handheld camera."
+            )
 
         real_urls, gen_url = await asyncio.gather(
             fetch_unsplash_image(query),
