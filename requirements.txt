@@ -4,3 +4,5 @@ aiohttp
 pydantic
 python-dotenv
 openai>=1.42.0
+torch
+torchvision
