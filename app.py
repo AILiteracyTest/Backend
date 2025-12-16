@@ -115,7 +115,7 @@ def build_random_query() -> str:
 
     # ---------------- 풍경 ----------------
     if category == "landscape":
-        scenes = ["mountain landscape", "ocean sea view landscape", "desert landscape"]
+        scenes = ["mountain landscape", "ocean sea view landscape", "desert landscape","forest landscape"]
         return random.choice(scenes)
 
 def _init_score_db() -> None: #백분위 계산-점수 테이블 생성 함수
