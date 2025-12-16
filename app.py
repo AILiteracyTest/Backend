@@ -12,6 +12,7 @@ from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.concurrency import run_in_threadpool
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
@@ -24,6 +25,8 @@ TMP_DIR = BASE_DIR / "tmp_images"
 TMP_DIR.mkdir(exist_ok=True)
 SCORE_DB_PATH=BASE_DIR/'scores.db' #백분위 계산 - DB 파일 경로 상수 추가
 
+DATA_DIR = BASE_DIR / "db_folder"
+
 OPENAI_API_KEY      = os.getenv("OPENAI_API_KEY")
 UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 
@@ -34,6 +37,8 @@ if not UNSPLASH_ACCESS_KEY:
 
 # ========= FastAPI 앱 =========
 app = FastAPI(title="Image Analysis (FastAPI+async)")
+
+app.mount("/db_folder", StaticFiles(directory=str(DATA_DIR)), name="db_folder")
 
 app.add_middleware(
     CORSMiddleware,
@@ -171,6 +176,20 @@ def _insert_and_calc(score: int) -> dict: #백분위-DB 저장 + 백분위 계�
     finally:
         conn.close()
         
+REAL_DIR = DATA_DIR / "real"
+FAKE_DIR = DATA_DIR / "fake"
+TEXT_DIR = DATA_DIR / "text"
+
+def get_all_ids() -> list[int]:
+    # text 기준으로 id 수집 (가장 안전)
+    ids = []
+    for p in TEXT_DIR.glob("*.txt"):
+        try:
+            ids.append(int(p.stem))
+        except ValueError:
+            pass
+    return sorted(ids)
+        
 async def fetch_unsplash_image(query: str) -> List[str]:
     assert http_session is not None
     url = "https://api.unsplash.com/photos/random"
@@ -229,10 +248,17 @@ class ImageAnalysisOut(BaseModel):
     
 class ScoreIn(BaseModel): #백분위 계산-점수 요청 모델
     score: int
-# ========= 라우트 (Sightengine 제거) =========
+
+class LoadImagesOut(BaseModel):
+    sample_id: int
+    real_url: str
+    fake_url: str
+    explanation: str
+    
+# ========= 이미지 생성 및 불러오기 =========
 @app.get("/image_analysis", response_model=ImageAnalysisOut)
 async def image_analysis(
-    mode: str = Query("default", pattern="^.*$"),  # 하위호환용으로 파라미터만 남김(의미 없음)
+    mode: str = Query("default", pattern="^.*$"),  
     run_id: Optional[str] = Query(None),
 ):
     """
@@ -300,8 +326,9 @@ async def image_analysis(
         unsplash={"images": real_urls},
         synthetic=SyntheticOut(generated_image_url=gen_url, explanation=explanation_text,),
     )
-
-@app.post("/score") #백분위 계산-엔트포인트 추가
+    
+# ========= 백분위 계산 =========
+@app.post("/score")
 async def save_score(payload: ScoreIn):
     
     if payload.score < 0:
@@ -309,3 +336,36 @@ async def save_score(payload: ScoreIn):
     
     stats = await run_in_threadpool(_insert_and_calc, payload.score)
     return stats
+
+# ========= DB 내 데이터 불러오기 =========
+@app.get("/load_images", response_model=LoadImagesOut)
+async def load_images():
+    ids = await run_in_threadpool(get_all_ids)
+    if not ids:
+        raise HTTPException(status_code=404, detail="No samples found")
+
+    sample_id = random.choice(ids)
+
+    # 확장자 달라도 OK
+    def find_img(folder, sid):
+        for ext in [".jpg", ".jpeg", ".png", ".webp"]:
+            p = folder / f"{sid}{ext}"
+            if p.exists():
+                return p
+        return None
+
+    real_path = find_img(REAL_DIR, sample_id)
+    fake_path = find_img(FAKE_DIR, sample_id)
+    text_path = TEXT_DIR / f"{sample_id}.txt"
+
+    if not real_path or not fake_path or not text_path.exists():
+        raise HTTPException(status_code=500, detail="Dataset mismatch")
+
+    explanation = await run_in_threadpool(text_path.read_text, "utf-8")
+
+    return LoadImagesOut(
+        sample_id=sample_id,
+        real_url=f"/db_folder/real/{real_path.name}",
+        fake_url=f"/db_folder/fake/{fake_path.name}",
+        explanation=explanation
+    )
