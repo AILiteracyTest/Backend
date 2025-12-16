@@ -39,7 +39,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
-        "https://ai-literacy-test.vercel.app" 
+        "https://ai-literacy-test.netlify.app"
     ],
     allow_credentials=True,
     allow_methods=["*"],
