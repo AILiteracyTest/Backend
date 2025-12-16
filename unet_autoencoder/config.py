@@ -18,8 +18,8 @@ res_dir = BASE_DIR / 'results'
 
 # 데이터 루트 폴더 (여기 아래에 train/val 폴더가 있다고 가정)
 data_dir = BASE_DIR / 'data'          # ./data
-train_dir = BASE_DIR / 'train'        # ./data/train
-val_dir = BASE_DIR / 'val'            # ./data/val
+train_dir = data_dir / 'train'        # ./data/train
+val_dir = data_dir / 'val'            # ./data/val
 
 # 나중에 train.py에서:
 # train_data_dir = os.path.join(data_dir, train_dir)
@@ -46,7 +46,7 @@ ckpt = 'model01.pth'
 lr = 1e-4        # AE 학습이면 1e-4 정도가 보통 더 잘 맞음 (1e-5는 약간 느림)
 
 # epoch 수
-epochs = 20      # AE는 12보다 조금 더 돌려도 괜찮음. 필요에 따라 조정
+epochs = 40      # AE는 12보다 조금 더 돌려도 괜찮음. 필요에 따라 조정
 
 # batch size
 batch_size = 32  # 메모리 보고 조정 (터지면 16, 8로 줄이기)

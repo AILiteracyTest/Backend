@@ -104,10 +104,13 @@ transform = transforms.Compose([
 # -----------------------------
 # Dataset / Dataloader
 # -----------------------------
-train_dataset = DAE_dataset(os.path.join(data_dir, train_dir),
+'''train_dataset = DAE_dataset(os.path.join(data_dir, train_dir),
                             transform=transform)
 val_dataset = DAE_dataset(os.path.join(data_dir, val_dir),
-                          transform=transform)
+                          transform=transform)'''
+                          
+train_dataset = DAE_dataset(train_dir, transform=transform)
+val_dataset   = DAE_dataset(val_dir, transform=transform)
 
 print('\nlen(train_dataset) : ', len(train_dataset))
 print('len(val_dataset)   : ', len(val_dataset))
@@ -118,11 +121,15 @@ train_loader = torch.utils.data.DataLoader(
     train_dataset,
     batch_size=batch_size,
     shuffle=True,
+    num_workers=4,
+    pin_memory=True,
 )
 val_loader = torch.utils.data.DataLoader(
     val_dataset,
     batch_size=batch_size,
     shuffle=False,
+    num_workers=4,
+    pin_memory=True,
 )
 
 print('\nlen(train_loader): {}  @bs={}'.format(len(train_loader), batch_size))
@@ -176,7 +183,15 @@ else:
 lr = cfg.lr
 optimizer = optim.Adam(
     filter(lambda p: p.requires_grad, model.parameters()),
-    lr=lr
+    lr=lr,
+    weight_decay=1e-5
+)
+
+scheduler = lr_scheduler.ReduceLROnPlateau(
+    optimizer,
+    mode='min',
+    factor=0.5,
+    patience=3
 )
 
 # AE reconstruction loss: MSE나 L1 둘 다 가능
@@ -192,12 +207,19 @@ print(f'lr             : {lr}')
 print(f'epochs_till_now: {epochs_till_now}')
 print(f'epochs from now: {epochs}')
 
+best_val = float('inf')
+best_path = None
+
 # -----------------------------
 # Training Loop
 # -----------------------------
 for epoch in range(epochs_till_now, epochs_till_now + epochs):
     print('\n===== EPOCH {}/{} ====='.format(
         epoch + 1, epochs_till_now + epochs))
+    
+    # --- epoch 별 running loss 초기화 ---
+    running_train_loss = []
+    running_val_loss = []
 
     # ===== TRAIN =====
     print('\nTRAINING...')
@@ -230,8 +252,7 @@ for epoch in range(epochs_till_now, epochs_till_now + epochs):
                     s
                 )
             )
-
-    train_epoch_loss.append(np.array(running_train_loss).mean())
+    train_epoch_loss.append(np.mean(running_train_loss))
 
     epoch_train_time = time.time() - epoch_train_start_time
     m, s = divmod(epoch_train_time, 60)
@@ -263,7 +284,26 @@ for epoch in range(epochs_till_now, epochs_till_now + epochs):
                     )
                 )
 
-    val_epoch_loss.append(np.array(running_val_loss).mean())
+    mean_val = np.mean(running_val_loss)
+    val_epoch_loss.append(mean_val)
+    
+    scheduler.step(mean_val)
+    
+    if mean_val < best_val:
+        best_val = mean_val
+        best_path = os.path.join(models_dir, 'best_model.pth')
+        torch.save(
+            {
+                'model_state_dict': model.state_dict(),
+                'losses': {
+                    'train_epoch_loss': train_epoch_loss,
+                    'val_epoch_loss': val_epoch_loss
+                },
+                'epochs_till_now': epoch + 1
+            },
+            best_path
+        )
+        print(f"✓ Saved new best model at epoch {epoch+1}: loss={mean_val:.6f}")
 
     epoch_val_time = time.time() - epoch_val_start_time
     m, s = divmod(epoch_val_time, 60)
@@ -278,21 +318,6 @@ for epoch in range(epochs_till_now, epochs_till_now + epochs):
         train_epoch_loss,
         val_epoch_loss,
         epoch
-    )
-
-    # 체크포인트 저장
-    torch.save(
-        {
-            'model_state_dict': model.state_dict(),
-            'losses': {
-                'running_train_loss': running_train_loss,
-                'running_val_loss': running_val_loss,
-                'train_epoch_loss': train_epoch_loss,
-                'val_epoch_loss': val_epoch_loss
-            },
-            'epochs_till_now': epoch + 1
-        },
-        os.path.join(models_dir, 'model{}.pth'.format(str(epoch + 1).zfill(2)))
     )
 
 # -----------------------------

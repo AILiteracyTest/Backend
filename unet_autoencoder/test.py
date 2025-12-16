@@ -22,7 +22,7 @@ def ask_vlm_explanation(overlay_path, mean_err, p95_err, max_err):
     img_b64 = load_image_base64(overlay_path)
 
     system_prompt = """
-    당신의 역할은 '이미지가 왜 AI가 생성한 이미지처럼 보이는지'
+    당신의 역할은 '이미지가 왜 AI로 생성된 이미지처럼 보이는지'
     Autoencoder 재구성 오차(heatmap)를 근거로 명확하게 설명하는 것입니다.
 
     제공되는 합성 이미지에는 다음 네 가지가 포함됩니다:
@@ -32,10 +32,9 @@ def ask_vlm_explanation(overlay_path, mean_err, p95_err, max_err):
     4) 히트맵을 원본 위에 덮은 오버레이 이미지
 
     Autoencoder는 '실제 사진(real-world photos)'만을 학습한 모델이며,
-    특정 영역에서 재구성 오차가 크다는 것은
-    그 구역이 실제 사진 분포에서 벗어난 비정상적 패턴을 포함한다는 것을 의미합니다.
+    특정 영역에서 재구성 오차가 크다는 것은 그 구역이 실제 사진 분포에서 벗어난 비정상적 패턴을 포함한다는 것을 의미합니다.
 
-    당신의 답변에서는 다음을 지켜주세요:
+    답변 시 반드시 다음을 지키세요:
     - 구체적인 위치를 언급하세요.
     - '왜 해당 영역이 비정상적인지'를 사진적 관점(텍스처, 형태, 조명, 구조 등)에서 설명하세요.
     - 출력 언어는 반드시 한국어로 하세요.
@@ -236,18 +235,21 @@ def run_on_image(img_path, ckpt_name="model20.pth"):
     mean_err = err.mean()
     p95_err = np.percentile(err, 95)
     max_err = err.max()
+    high_mask = err >= p95_err
+    high_ratio = float(high_mask.mean() * 100.0)
 
     base = os.path.splitext(os.path.basename(img_path))[0]
     save_path = os.path.join(cfg.res_dir, f"{base}_ae_heatmap.png")
     visualize_result(orig, x, recon, err_map, save_path)
 
     # VLM 호출
-    explanation = ask_vlm_explanation(save_path, mean_err, p95_err, max_err)
+    explanation = ask_vlm_explanation(save_path, mean_err, p95_err, max_err, high_ratio)
     return {
         "overlay_path": save_path,
         "mean_err": float(mean_err),
         "p95_err": float(p95_err),
         "max_err": float(max_err),
+        "high_ratio": float(high_ratio),
         "explanation": explanation,
     }
 
