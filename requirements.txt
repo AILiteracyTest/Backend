@@ -7,3 +7,6 @@ openai>=1.42.0
 torch
 torchvision
 opencv-python-headless
+matplotlib
+numpy
+Pillow
